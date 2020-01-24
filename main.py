@@ -106,6 +106,8 @@ def admin_menu(event):
         num = sessionStorage[user_id]._ADMIN_DATA.pop('num')
         if text == 'УДАЛИТЬ':
             poolRecords[num]._LOCK.acquire() # Блокируем доступ
+            for ids in poolRecords[num]._IDS:
+                sessionStorage[ids]._REC.remove(num)
             poolRecords.pop(num)
             answer = 'Сеанс удален'
         else:
@@ -439,14 +441,11 @@ def msg_handler(event):
     elif action == 'pool.show': # main
         answer = 'Количество записей: ' + str(len(sessionStorage[user_id]._REC)) + '\n\n'
 
-        del_idx = []
         for sec in sessionStorage[user_id]._REC:
             try:
                 answer += poolRecords[sec].get_show_data()
             except KeyError: # Сеанс удален
-                del_idx.append(sec)
-        for i in del_idx:
-            sessionStorage[user_id]._REC.remove(sec)
+                pass
         if len(sessionStorage[user_id]._REC) == 0:
             answer = 'У вас нет записей'
         
@@ -481,16 +480,13 @@ def msg_handler(event):
 
     elif action == 'pool.del': # main
         my_keyb = []
-        del_idx = []
         for sec in sessionStorage[user_id]._REC:
             try:
                 date = poolRecords[sec].get_day() + ' ' + poolRecords[sec].get_time()
                 color = VkKeyboardColor.DEFAULT
                 my_keyb.append({'label': date, 'color': color, 'payload': {'action': 'pool.del.num', 'num': sec}})
             except KeyError: # Сеанс удален
-                del_idx.append(sec)
-        for i in del_idx:
-            sessionStorage[user_id]._REC.remove(sec)
+                pass
         if len(my_keyb) == 0:
             answer = 'У вас нет ни одной записи'
             keyboard = get_keyboard(sessionStorage[user_id]._STEP)
