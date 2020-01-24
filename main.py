@@ -1,15 +1,12 @@
-import apiai
-import json
-
-import threading
-import time
-
 import vk_api
 from vk_api.longpoll import VkLongPoll, VkEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from vk_api.utils import get_random_id
 
 from config import *
+from TimeModule import *
+from VkBot import *
+from ai import *
 
 # Логгирование
 import logging
@@ -21,58 +18,26 @@ sessionStorage = {}
 # Хранилище данных о возможных записях в бассейн
 poolRecords = {}
 
-# Замок для доступа к ресурсу
-lock = threading.Lock()
-
-# ID ВК для админов
-admin_ids = [] 
-
-def make_keyb(my_keyb, user_id, answer):
+def make_keyb(my_keyb, user_id, answer, col = 1):
     keyboard = VkKeyboard(one_time = False)
-    for i in range(min(8, len(my_keyb))):
+    last = True
+    for i in range(min(8 * col, len(my_keyb))):
         keyboard.add_button(my_keyb[i]['label'], color=my_keyb[i]['color'], payload=my_keyb[i]['payload'])
-        keyboard.add_line()
-    if len(my_keyb) > 8:
+        if (i + 1) % col == 0:
+            keyboard.add_line()
+            last = True
+        else:
+            last = False
+    if len(my_keyb) > 8 * col:
         sessionStorage[user_id]._KEYB = my_keyb
         sessionStorage[user_id]._PAGE = 0
+        sessionStorage[user_id]._COL = col
         keyboard.add_button('Далее ->', color=VkKeyboardColor.PRIMARY, payload={'action': 'bot.next_page', 'text': answer})
+        keyboard.add_line()
+    if not last:
         keyboard.add_line()
     keyboard.add_button('Отмена', color=VkKeyboardColor.PRIMARY, payload={'action': 'bot.cancel'})  
     return keyboard.get_keyboard()
-
-def get_ai_answer(text, session_id):
-
-    ai_action, ai_parameters, ai_contexts, ai_response = '#no_answer', '', {}, []
-    
-    # DIALOGFLOW_START
-
-    logging.debug('Connecting to DialogFlow')
-    ai_request = apiai.ApiAI(TOKEN_AI).text_request() # Токен API к Dialogflow
-    logging.debug('Connected')
-    ai_request.lang = 'ru' # На каком языке будет послан запрос
-    ai_request.session_id = session_id # ID Сессии диалога (нужно, чтобы потом учить бота)
-    logging.debug('Sending text to DialogFlow')
-    ai_request.query = text # Посылаем запрос к ИИ с сообщением от юзера
-    logging.debug('Sent')
-    logging.debug('Getting result from DialogFlow')
-    responseJson = json.loads(ai_request.getresponse().read().decode('utf-8'))
-    logging.debug('Got')
-    ai_response = responseJson['result']['fulfillment']['speech'] # Разбираем JSON и вытаскиваем ответ
-
-    if 'action' in responseJson['result']:
-        ai_action = responseJson['result']['action']
-    if 'parameters' in responseJson['result']:
-        ai_parameters = responseJson['result']['parameters']
-    if 'contexts' in responseJson['result']:
-        ai_contexts = responseJson['result']['contexts']
-            
-    # Если есть ответ от бота - присылаем юзеру, если нет - бот его не понял
-    if not ai_response:
-        ai_response = '#no_answer'
-
-    # DIALOGFLOW_FINISH
-
-    return ai_action, ai_parameters, ai_contexts, ai_response
 
 def get_user_info(user_id):
     return vk.users.get(user_ids=user_id)
@@ -82,102 +47,20 @@ def get_keyboard(step):
         keyboard = KDICT[step]
     except Exception:
         keyboard = KDICT['#all']
-    
     return keyboard
-
-month = {1: 'января', 2: 'февраля', 3: 'марта', 4: 'апреля', 5: 'мая', 6: 'июня', 7: 'июля', 8: 'августа', 9: 'сентября', 10: 'октября', 11: 'ноября', 12: 'декабря'}
-
-def get_str_time(t):
-    return str(t.tm_hour) + ' ' + str(t.tm_min)
-
-class PoolTime:
-
-    def __init__(self, day, mon, year, hour, mn, count):
-        self._TIME = time.localtime(time.mktime((year, mon, day, hour, mn, 0, 0, 0, 0)))
-        self._COUNT = count
-        self._IDS = []
-
-    def __len__(self):
-        return self._COUNT
-
-    def __str__(self):
-        return self.get_day() + ' ' + self.get_time() + ' (свободно ' + str(self._COUNT) + ')'
-
-    def get_day(self):
-        return str(self._TIME.tm_mday) + ' ' + month[self._TIME.tm_mon] + ' ' + str(self._TIME.tm_year)
-
-    def get_time(self):
-        return time.strftime("%H:%M", self._TIME)
-        return get_str_time(self._TIME)
-
-    def get_sec(self):
-        return time.mktime(self._TIME)
-
-    def get_show_data(self):
-        answer = 'Дата: ' + self.get_day() + '\n'
-        answer += 'Время: ' + self.get_time() + '\n'
-        answer += '\n'
-        return answer
-
-    def add(self, user_id):
-        self._IDS.append(user_id)
-
-class VkBot:
-
-    def __init__(self, user_id):
-        logging.info('class VkBot [%s]: Created', str(user_id))
-
-        user_info = get_user_info(user_id)
-
-        self._USER_ID = user_id # ID ользователя ВК
-        self._FIRST_NAME = user_info[0]['first_name'] # Имя ВК
-        self._LAST_NAME = user_info[0]['last_name'] # Фамилия ВК
-        self._STEP = 'mainUS' # Шаг
-        self._AUTH = False 
-        self._ADMIN = False # Админ-панель
-
-        self._REC = [] # Записи
-
-        self._KEYB = [] # Клавиши для клавиатуры
-        self._PAGE = 1 # Страница клавиатуры
-
-    def __str__(self):
-        answer = 'User ID: ' + str(self._USER_ID) + '\n'
-        answer += 'User: ' + self._FIRST_NAME + ' ' + self._LAST_NAME + '\n'
-        answer += 'Step: ' + self._STEP + '\n'
-        answer += 'Auth: ' + str(self._AUTH) + '\n'
-        answer += 'Admin: ' + str(self._ADMIN) + '\n'
-        answer += 'Link: @id' + str(self._USER_ID) + '\n'
-        return answer
-
-    def auth(self):
-        self._AUTH = True
-        self._STEP = 'main'
-        return self._AUTH
-
-    def prev_step(self):
-        if '_' not in self._STEP:
-            return
-        text = self._STEP
-        text = text.split('_')
-        text.pop()
-        text = '_'.join(text)
-        self._STEP = text
-
-    def next_step(self, step):
-        self._STEP += '_' + step
-
-    def set_step(self, step):
-        self._STEP = step
     
 def write_msg(user_id, message, msg_id = None, keyboard = None):
-    vk.messages.send(
-        user_id=user_id,
-        reply_to=msg_id,
-        message=message,
-        random_id=get_random_id(),
-        keyboard=keyboard
-    )
+    try:
+        vk.messages.send(
+            user_id=user_id,
+            reply_to=msg_id,
+            message=message,
+            random_id=get_random_id(),
+            keyboard=keyboard
+        )
+    except Exception:
+        logging.error('Sending message to %d failed', user_id)
+        print('ERROR: Sending message to %d failed', user_id)
 
 # Авторизуемся как сообщество
 vk_session = vk_api.VkApi(token=TOKEN)
@@ -185,6 +68,9 @@ vk = vk_session.get_api()
 
 # Работа с сообщениями
 longpoll = VkLongPoll(vk_session)
+
+# ID для уведомлений о новых записях
+notif_ids = []
 
 logging.info('Server started')
 print('Server started')
@@ -198,34 +84,50 @@ def main():
 
             user_id = event.user_id
             if sessionStorage.get(user_id) == None:
-                sessionStorage[user_id] = VkBot(user_id)
+                sessionStorage[user_id] = VkBot(user_id, get_user_info(user_id))
 
             msg_handler(event)
             continue
 
 def admin_menu(event):
     user_id = event.user_id
-    text = event.text.lower()
+    text = event.text
     msg_id = event.message_id
+    step = sessionStorage[user_id]._STEP
     if 'payload' in dir(event):
         payload = eval(event.payload)
     else:
         payload = None
-
     action = None
-
     if payload:
         action = payload.get('action')
 
-    if action == 'admin.show':
+    if action == None and step == 'mainUS_admin_del':
+        num = sessionStorage[user_id]._ADMIN_DATA.pop('num')
+        if text == 'УДАЛИТЬ':
+            poolRecords[num]._LOCK.acquire() # Блокируем доступ
+            poolRecords.pop(num)
+            answer = 'Сеанс удален'
+        else:
+            answer = 'Действие отменено'
+            
+        sessionStorage[user_id].prev_step()
+        keyboard = get_keyboard(sessionStorage[user_id]._STEP)
+        write_msg(event.user_id, answer, keyboard=keyboard)
+        return
+
+    elif action == 'admin.show':
         answer = 'Список сеансов:\n\n'
         my_keyb = []
-        my_keyb.append({'label': 'Показать все', 'color': VkKeyboardColor.PRIMARY, 'payload': {'action': 'admin.show.all'}})
-        for sec in poolRecords:
-            date = poolRecords[sec].get_day() + ' ' + poolRecords[sec].get_time()
-            color = VkKeyboardColor.PRIMARY
-            my_keyb.append({'label': date, 'color': color, 'payload': {'action': 'admin.show.num', 'num': sec}})
-            answer += str(poolRecords[sec]) + '\n'
+        #my_keyb.append({'label': 'Показать все', 'color': VkKeyboardColor.PRIMARY, 'payload': {'action': 'admin.show.all'}})
+        for sec in sorted(poolRecords):
+            try:
+                date = poolRecords[sec].get_day() + ' ' + poolRecords[sec].get_time()
+                color = VkKeyboardColor.PRIMARY
+                my_keyb.append({'label': date, 'color': color, 'payload': {'action': 'admin.show.num', 'num': sec}})
+                answer += str(poolRecords[sec]) + '\n'
+            except KeyError: # Сеанс удален
+                pass
         if len(my_keyb) == 0:
             answer = 'Сеансов не найдено'
             keyboard = get_keyboard(sessionStorage[user_id]._STEP)
@@ -236,32 +138,118 @@ def admin_menu(event):
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
-    elif action == 'admin.show.all': ###
-        answer = 'pass'
+    #elif action == 'admin.show.all': ###
+    #    answer = 'pass'
+    #    sessionStorage[user_id].prev_step()
+    #    keyboard = get_keyboard(sessionStorage[user_id]._STEP)
+    #    write_msg(event.user_id, answer, keyboard=keyboard)
+    #    return
+
+    elif action == 'admin.show.num':
+        num = payload['num']
+        try:
+            answer = poolRecords[num].get_show_data() + 'Список участников:\n'
+            for ids in poolRecords[num]._IDS:
+                answer += sessionStorage[ids].get_name() + ' ' + sessionStorage[ids].get_link() + '\n'
+            if len(poolRecords[num]._IDS) == 0:
+                answer += 'Участников нет'
+        except KeyError: # Сеанс удален
+            answer = 'Извините, сеанс удален'
         sessionStorage[user_id].prev_step()
         keyboard = get_keyboard(sessionStorage[user_id]._STEP)
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
-    elif action == 'admin.show.num': ###
-        answer = 'pass'
-        sessionStorage[user_id].prev_step()
-        keyboard = get_keyboard(sessionStorage[user_id]._STEP)
+    elif action == 'admin.add': 
+        data = get_session_data()
+        my_keyb = []
+        for i in range(len(data)):
+            label = month_im[data[i][1]] + ' ' + str(data[i][0])
+            color = VkKeyboardColor.PRIMARY
+            my_keyb.append({'label': label, 'color': color, 'payload': {'action': 'admin.add.mon', 'num': i}})
+        sessionStorage[user_id]._ADMIN_DATA['add'] = data
+        answer = 'Выберите месяц'
+        keyboard = make_keyb(my_keyb, user_id, answer)
+        sessionStorage[user_id].next_step('add')
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
-    elif action == 'admin.add': ###
-        answer = 'pass'
+    elif action == 'admin.add.mon': 
+        num = payload['num']
+        data = sessionStorage[user_id]._ADMIN_DATA['add'][num]
+        my_keyb = []
+        for i in range(data[2], data[3] + 1):
+            label = str(i)
+            color = VkKeyboardColor.PRIMARY
+            my_keyb.append({'label': label, 'color': color, 'payload': {'action': 'admin.add.day', 'num': i}})
+        sessionStorage[user_id]._ADMIN_DATA['add'] = data
+        answer = 'Выберите дату'
+        keyboard = make_keyb(my_keyb, user_id, answer, 4)
+        write_msg(event.user_id, answer, keyboard=keyboard)
+        return
+
+    elif action == 'admin.add.day': 
+        day = payload['num']
+        sessionStorage[user_id]._ADMIN_DATA['add'].pop()
+        sessionStorage[user_id]._ADMIN_DATA['add'].pop()
+        sessionStorage[user_id]._ADMIN_DATA['add'].append(day)
+        my_keyb = []
+        for i in range(6, 22):
+            label = str(i)
+            color = VkKeyboardColor.PRIMARY
+            my_keyb.append({'label': label, 'color': color, 'payload': {'action': 'admin.add.hour', 'num': i}})
+        answer = 'Выберите время (часы)'
+        keyboard = make_keyb(my_keyb, user_id, answer, 2)
+        write_msg(event.user_id, answer, keyboard=keyboard)
+        return
+
+    elif action == 'admin.add.hour': 
+        hour = payload['num']
+        sessionStorage[user_id]._ADMIN_DATA['add'].append(hour)
+        my_keyb = []
+        for i in range(0, 60, 5):
+            label = str(i)
+            color = VkKeyboardColor.PRIMARY
+            my_keyb.append({'label': label, 'color': color, 'payload': {'action': 'admin.add.min', 'num': i}})
+        answer = 'Выберите время (минуты)'
+        keyboard = make_keyb(my_keyb, user_id, answer, 2)
+        write_msg(event.user_id, answer, keyboard=keyboard)
+        return
+
+    elif action == 'admin.add.min': 
+        mn = payload['num']
+        sessionStorage[user_id]._ADMIN_DATA['add'].append(mn)
+        my_keyb = []
+        for i in range(32, 0, -1):
+            label = str(i)
+            color = VkKeyboardColor.PRIMARY
+            my_keyb.append({'label': label, 'color': color, 'payload': {'action': 'admin.add.count', 'num': i}})
+        answer = 'Выберите количество свободных мест'
+        keyboard = make_keyb(my_keyb, user_id, answer, 4)
+        write_msg(event.user_id, answer, keyboard=keyboard)
+        return
+
+    elif action == 'admin.add.count': 
+        count = payload['num']
+        sessionStorage[user_id]._ADMIN_DATA['add'].append(count)
+        elem = sessionStorage[user_id]._ADMIN_DATA.pop('add')
+        t = PoolTime(elem[0], elem[1], elem[2], elem[3], elem[4], elem[5])
+        poolRecords[t.get_sec()] = t
+        answer = 'Сеанс ' + str(t) + ' добавлен'
+        sessionStorage[user_id].prev_step()
         keyboard = get_keyboard(sessionStorage[user_id]._STEP)
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
     elif action == 'admin.del':
         my_keyb = []
-        for sec in poolRecords:
-            date = str(poolRecords[sec])
-            color = VkKeyboardColor.PRIMARY
-            my_keyb.append({'label': date, 'color': color, 'payload': {'action': 'admin.del.num', 'num': sec}})
+        for sec in sorted(poolRecords):
+            try:
+                date = str(poolRecords[sec])
+                color = VkKeyboardColor.PRIMARY
+                my_keyb.append({'label': date, 'color': color, 'payload': {'action': 'admin.del.num', 'num': sec}})
+            except KeyError: # Сеанс удален
+                pass
         if len(my_keyb) == 0:
             answer = 'Сеансов не найдено'
             keyboard = get_keyboard(sessionStorage[user_id]._STEP)
@@ -272,10 +260,18 @@ def admin_menu(event):
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
-    elif action == 'admin.del.num': ###
-        answer = 'pass'
-        sessionStorage[user_id].prev_step()
-        keyboard = get_keyboard(sessionStorage[user_id]._STEP)
+    elif action == 'admin.del.num':
+        num = payload['num']
+        try:
+            answer = poolRecords[num].get_show_data()
+            answer += 'Вы уверены, что хотите удалить сеанс? Отмена невозможна!\n'
+            answer += 'Подтвердите удаление, написав УДАЛИТЬ'
+            sessionStorage[user_id]._ADMIN_DATA['num'] = num
+            keyboard = make_keyb([], user_id, '')
+        except KeyError: # Сеанс удален
+            answer = 'Сеанс уже удален'
+            sessionStorage[user_id].prev_step()
+            keyboard = get_keyboard(sessionStorage[user_id]._STEP)
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
@@ -283,6 +279,17 @@ def admin_menu(event):
         sessionStorage[user_id].prev_step()
         sessionStorage[user_id]._ADMIN = False
         answer = 'Выход выполнен'
+        keyboard = get_keyboard(sessionStorage[user_id]._STEP)
+        write_msg(event.user_id, answer, keyboard=keyboard)
+        return
+
+    elif action == 'admin.notif': 
+        if user_id in notif_ids:
+            notif_ids.remove(user_id)
+            answer = 'Уведомления о новых записях выключены'
+        else:
+            notif_ids.append(user_id)
+            answer = 'Уведомления о новых записях включены'
         keyboard = get_keyboard(sessionStorage[user_id]._STEP)
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
@@ -328,7 +335,7 @@ def msg_handler(event):
 
     # ANSWER
 
-    if action == 'bot.next_page':
+    if action == 'bot.next_page': # НЕДОДЕЛАНО: Колонки
         keyboard = VkKeyboard(one_time = False)
         answer = payload['text']
         sessionStorage[user_id]._PAGE += 1
@@ -347,7 +354,7 @@ def msg_handler(event):
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
-    elif action == 'bot.prev_page':
+    elif action == 'bot.prev_page': # НЕДОДЕЛАНО: Колонки
         keyboard = VkKeyboard(one_time = False)
         answer = payload['text']
         sessionStorage[user_id]._PAGE -= 1
@@ -397,7 +404,7 @@ def msg_handler(event):
             if sessionStorage[user_id].auth():
                 answer = 'Вы зарегистрированы!'
             else:
-                answer = 'Регистрация не удалась((('
+                answer = 'Регистрация не удалась(((\nОбратитесь к администратору'
 
             keyboard = get_keyboard(sessionStorage[user_id]._STEP)
             write_msg(event.user_id, answer, keyboard=keyboard)
@@ -414,7 +421,7 @@ def msg_handler(event):
             write_msg(event.user_id, answer, keyboard=keyboard)
             return
 
-        elif action == 'bot.auth': ###
+        elif action == 'bot.auth': # НЕДОДЕЛАНО: Регистрация
             answer = 'pass'
             keyboard = get_keyboard(sessionStorage[user_id]._STEP)
             write_msg(event.user_id, answer, keyboard=keyboard)
@@ -431,9 +438,15 @@ def msg_handler(event):
 
     elif action == 'pool.show': # main
         answer = 'Количество записей: ' + str(len(sessionStorage[user_id]._REC)) + '\n\n'
-        
+
+        del_idx = []
         for sec in sessionStorage[user_id]._REC:
-            answer += poolRecords[sec].get_show_data()
+            try:
+                answer += poolRecords[sec].get_show_data()
+            except KeyError: # Сеанс удален
+                del_idx.append(sec)
+        for i in del_idx:
+            sessionStorage[user_id]._REC.remove(sec)
         if len(sessionStorage[user_id]._REC) == 0:
             answer = 'У вас нет записей'
         
@@ -443,15 +456,18 @@ def msg_handler(event):
 
     elif action == 'pool.add': # main
         my_keyb = []
-        for sec in poolRecords:
-            if len(poolRecords[sec]) > 0 and (sec not in sessionStorage[user_id]._REC):
-                date = str(poolRecords[sec])
-                color = VkKeyboardColor.NEGATIVE
-                if len(poolRecords[sec]) > 10:
-                    color = VkKeyboardColor.POSITIVE
-                elif len(poolRecords[sec]) > 5:
-                    color = VkKeyboardColor.DEFAULT
-                my_keyb.append({'label': date, 'color': color, 'payload': {'action': 'pool.add.num', 'num': sec}})
+        for sec in sorted(poolRecords):
+            try:
+                if len(poolRecords[sec]) > 0 and (sec not in sessionStorage[user_id]._REC):
+                    date = str(poolRecords[sec])
+                    color = VkKeyboardColor.NEGATIVE
+                    if len(poolRecords[sec]) > 10:
+                        color = VkKeyboardColor.POSITIVE
+                    elif len(poolRecords[sec]) > 5:
+                        color = VkKeyboardColor.DEFAULT
+                    my_keyb.append({'label': date, 'color': color, 'payload': {'action': 'pool.add.num', 'num': sec}})
+            except KeyError: # Сеанс удален
+                pass
         if len(my_keyb) == 0:
             answer = 'Доступных записей нет'
             keyboard = get_keyboard(sessionStorage[user_id]._STEP)
@@ -465,10 +481,16 @@ def msg_handler(event):
 
     elif action == 'pool.del': # main
         my_keyb = []
+        del_idx = []
         for sec in sessionStorage[user_id]._REC:
-            date = poolRecords[sec].get_day() + ' ' + poolRecords[sec].get_time()
-            color = VkKeyboardColor.DEFAULT
-            my_keyb.append({'label': date, 'color': color, 'payload': {'action': 'pool.del.num', 'num': sec}})
+            try:
+                date = poolRecords[sec].get_day() + ' ' + poolRecords[sec].get_time()
+                color = VkKeyboardColor.DEFAULT
+                my_keyb.append({'label': date, 'color': color, 'payload': {'action': 'pool.del.num', 'num': sec}})
+            except KeyError: # Сеанс удален
+                del_idx.append(sec)
+        for i in del_idx:
+            sessionStorage[user_id]._REC.remove(sec)
         if len(my_keyb) == 0:
             answer = 'У вас нет ни одной записи'
             keyboard = get_keyboard(sessionStorage[user_id]._STEP)
@@ -482,28 +504,44 @@ def msg_handler(event):
 
     elif action == 'pool.add.num': # main_add
         num = int(payload['num'])
-
-        lock.acquire() # Блокируем доступ
-        if len(poolRecords[num]) > 0:
-            poolRecords[num]._COUNT -= 1
-            sessionStorage[user_id]._REC.append(num)
-            answer = 'Вы записаны в бассейн ' + poolRecords[num].get_day() + ' в ' + poolRecords[num].get_time()
-        else:
+        success = False
+        try:
+            poolRecords[num]._LOCK.acquire() # Блокируем доступ
+            if len(poolRecords[num]) > 0:
+                poolRecords[num].add(user_id)
+                sessionStorage[user_id]._REC.append(num)
+                answer = 'Вы записаны в бассейн ' + poolRecords[num].get_day() + ' в ' + poolRecords[num].get_time()
+                answer_notif = 'Пользователь ' + sessionStorage[user_id].get_name() + \
+                               ' ' + sessionStorage[user_id].get_link() + \
+                               ' записан в бассейн ' +  \
+                               poolRecords[num].get_day() + ' в ' + poolRecords[num].get_time()
+                success = True
+            else:
+                answer = 'Извините, мест больше нет(('
+            poolRecords[num]._LOCK.release() # Разблокируем доступ
+        except KeyError: # Сеанс удален
             answer = 'Извините, мест больше нет(('
-        lock.release() # Разблокируем доступ
 
         sessionStorage[user_id].prev_step()
 
         keyboard = get_keyboard(sessionStorage[user_id]._STEP)
         write_msg(event.user_id, answer, keyboard=keyboard)
+        if success:
+            for ids in notif_ids:
+                write_msg(ids, answer_notif)
         return
 
     elif action == 'pool.del.num': # main_del
         num = int(payload['num'])
-
-        poolRecords[num]._COUNT += 1
-        sessionStorage[user_id]._REC.pop(sessionStorage[user_id]._REC.index(num))
-        answer = 'Записьв бассейн ' + poolRecords[num].get_day() + ' в ' + poolRecords[num].get_time() + ' удалена'
+        try:
+            poolRecords[num]._LOCK.acquire() # Блокируем доступ
+            poolRecords[num].delete(user_id)
+            sessionStorage[user_id]._REC.remove(num)
+            answer = 'Запись в бассейн ' + poolRecords[num].get_day() + ' в ' + poolRecords[num].get_time() + ' удалена'
+            poolRecords[num]._LOCK.release() # Разблокируем доступ
+        except KeyError: # Сеанс удален
+            sessionStorage[user_id]._REC.remove(num)
+            answer = 'Запись в бассейн удалена'
 
         sessionStorage[user_id].prev_step()
 
@@ -512,7 +550,7 @@ def msg_handler(event):
         return
 
     elif action == 'bot.out': # Восстановление данных
-        sessionStorage[user_id] = VkBot(user_id)
+        sessionStorage[user_id].out()
         answer = 'Выход выполнен'
         keyboard = get_keyboard(sessionStorage[user_id]._STEP)
         write_msg(event.user_id, answer, keyboard=keyboard)
@@ -529,17 +567,17 @@ def msg_handler(event):
 
 # Базовые данные о сеансах
 base_data = [
-        (25, 2, 2020, 15, 00, 24),
-        (25, 2, 2020, 19, 00, 2),
-        (29, 2, 2020, 15, 00, 13),
-        (29, 2, 2020, 19, 00, 4),
-        (1, 3, 2020, 15, 00, 4),
-        (2, 3, 2020, 19, 00, 2),
-        (3, 3, 2020, 15, 00, 3),
-        (4, 3, 2020, 19, 00, 1),
-        (5, 3, 2020, 15, 00, 2),
-        (6, 3, 2020, 15, 00, 1),
-        (6, 3, 2020, 19, 00, 1)
+        (2020, 2, 25, 15, 00, 24),
+        (2020, 2, 25, 19, 00, 2),
+        (2020, 2, 29, 15, 00, 13),
+        (2020, 2, 29, 19, 00, 4),
+        (2020, 3, 1, 15, 00, 4),
+        (2020, 3, 2, 19, 00, 2),
+        (2020, 3, 3, 15, 00, 3),
+        (2020, 3, 4, 19, 00, 1),
+        (2020, 3, 5, 15, 00, 2),
+        (2020, 3, 6, 15, 00, 1),
+        (2020, 3, 6, 19, 00, 1)
     ]
 
 for elem in base_data:

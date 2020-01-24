@@ -2,15 +2,13 @@ from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 TOKEN = 'TOKEN'
 
-TOKEN_AI = 'TOKEN_AI'
-
-#directory = '/root/test_bot/'
+#directory = '/root/vk_bot/'
 directory = ''
 
-version = '0.1.1 Beta'
+version = '0.2.0 Beta'
 
-
-
+# ID ВК для админов
+admin_ids = []
 
 # Keyboards
 
@@ -36,6 +34,8 @@ keyboard_admin.add_line()
 keyboard_admin.add_button('Добавить сеанс', color=VkKeyboardColor.PRIMARY, payload={'action': 'admin.add'})
 keyboard_admin.add_line()
 keyboard_admin.add_button('Удалить сеанс', color=VkKeyboardColor.PRIMARY, payload={'action': 'admin.del'})
+keyboard_admin.add_line()
+keyboard_admin.add_button('Уведомления (вкл/выкл)', color=VkKeyboardColor.PRIMARY, payload={'action': 'admin.notif'})
 keyboard_admin.add_line()
 keyboard_admin.add_button('Выход', color=VkKeyboardColor.PRIMARY, payload={'action': 'admin.out'})
 keyboard_admin = keyboard_admin.get_keyboard()
