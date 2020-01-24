@@ -25,7 +25,7 @@ poolRecords = {}
 lock = threading.Lock()
 
 # ID ВК для админов
-admin_ids = [] # Я, Оля, Эдгар, Леша
+admin_ids = [] 
 
 def make_keyb(my_keyb, user_id, answer):
     keyboard = VkKeyboard(one_time = False)
