@@ -1,14 +1,16 @@
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
-TOKEN = 'TOKEN'
+TOKEN = "TOKEN"
 
-directory = '/root/vk_bot/'
-#directory = ''
+#directory = '/root/vk_bot/'
+directory = ''
 
-version = '0.2.1 Beta'
+version = '0.3.0 Beta'
 
 # ID ВК для админов
 admin_ids = []
+
+DATA_BACKUP_TIME = 60
 
 # Keyboards
 

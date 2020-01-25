@@ -8,6 +8,10 @@ from TimeModule import *
 from VkBot import *
 from ai import *
 
+# Потоки и время для резервного копирования
+from threading import Thread
+import time
+
 # Логгирование
 import logging
 logging.basicConfig(format = u'%(filename)s[LINE:%(lineno)d]# %(levelname)-8s [%(asctime)s]  %(message)s', level = logging.INFO, filename = directory + 'vktestbot.log')
@@ -62,6 +66,55 @@ def write_msg(user_id, message, msg_id = None, keyboard = None):
         logging.error('Sending message to %d failed', user_id)
         print('ERROR: Sending message to %d failed', user_id)
 
+# Базовые данные о сеансах
+base_data = [
+        (2020, 2, 25, 15, 00, 24),
+        (2020, 2, 25, 19, 00, 2),
+        (2020, 2, 29, 15, 00, 13),
+        (2020, 2, 29, 19, 00, 4),
+        (2020, 3, 1, 15, 00, 4),
+        (2020, 3, 2, 19, 00, 2),
+        (2020, 3, 3, 15, 00, 3),
+        (2020, 3, 4, 19, 00, 1),
+        (2020, 3, 5, 15, 00, 2),
+        (2020, 3, 6, 15, 00, 1),
+        (2020, 3, 6, 19, 00, 1)
+    ]
+
+def data_base_recovery():
+    for elem in base_data:
+        t = PoolTime(elem[0], elem[1], elem[2], elem[3], elem[4], elem[5])
+        poolRecords[t.get_sec()] = t
+
+def data_recovery():
+    FILE = open(directory + "data.backup", "r")
+    elem = eval(FILE.read())
+    data = {}
+    count = elem.pop(0)
+    for i in range(count):
+        t = PoolTime(elem.pop(0), elem.pop(0), elem.pop(0), elem.pop(0), elem.pop(0), elem.pop(0))
+        id_count = elem.pop(0)
+        sec = t.get_sec()
+        for j in range(id_count):
+            user_id = elem.pop(0)
+            if sessionStorage.get(user_id) == None:
+                sessionStorage[user_id] = VkBot(user_id, get_user_info(user_id))
+            sessionStorage[user_id].add_rec(sec)
+            t._IDS.append(user_id)
+        data[sec] = t
+    global poolRecords
+    poolRecords = data.copy()
+
+def data_backup():
+    data = poolRecords.copy()
+    elem = [len(data)]
+    for sec in data:
+        elem += data[sec].get_backup_data()
+    FILE = open(directory + "data.backup", "w")
+    FILE.write(str(elem))
+    FILE.close()
+    time.sleep(DATA_BACKUP_TIME)
+
 # Авторизуемся как сообщество
 vk_session = vk_api.VkApi(token=TOKEN)
 vk = vk_session.get_api()
@@ -71,6 +124,17 @@ longpoll = VkLongPoll(vk_session)
 
 # ID для уведомлений о новых записях
 notif_ids = []
+
+Backup_Thread = Thread()
+
+try:
+    data_recovery()
+    logging.info('Data recovery: Success!')
+    print('Data recovery:  Success!')
+except Exception as e:
+    logging.info('Data recovery: Error\n' + str(e))
+    print('Data recovery: Error\n' + str(e))
+    data_base_recovery()
 
 logging.info('Server started')
 print('Server started')
@@ -84,7 +148,7 @@ step_actions = {
         'mainUS_admin_del': ['admin.del.num'],
         'main_add': ['pool.add.num'],
         'main_del': ['pool.del.num']
-    }
+    }    
 
 def wrong_step(step, action):
     if action == None:
@@ -96,6 +160,7 @@ def wrong_step(step, action):
     return False
 
 def main():
+    global Backup_Thread
     for event in longpoll.listen():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
             
@@ -105,6 +170,9 @@ def main():
             if sessionStorage.get(user_id) == None:
                 sessionStorage[user_id] = VkBot(user_id, get_user_info(user_id))
 
+            if not Backup_Thread.is_alive():
+                Backup_Thread = Thread(target=data_backup)
+                Backup_Thread.start()
             msg_handler(event)
             continue
 
@@ -256,8 +324,11 @@ def admin_menu(event):
         sessionStorage[user_id]._ADMIN_DATA['add'].append(count)
         elem = sessionStorage[user_id]._ADMIN_DATA.pop('add')
         t = PoolTime(elem[0], elem[1], elem[2], elem[3], elem[4], elem[5])
-        poolRecords[t.get_sec()] = t
-        answer = 'Сеанс ' + str(t) + ' добавлен'
+        if t.get_sec() in poolRecords:
+            answer = 'Сеанс уже существует'
+        else:
+            poolRecords[t.get_sec()] = t
+            answer = 'Сеанс ' + str(t) + ' добавлен'
         sessionStorage[user_id].prev_step()
         keyboard = get_keyboard(sessionStorage[user_id]._STEP)
         write_msg(event.user_id, answer, keyboard=keyboard)
@@ -469,7 +540,7 @@ def msg_handler(event):
     elif action == 'pool.show': # main
         answer = 'Количество записей: ' + str(len(sessionStorage[user_id]._REC)) + '\n\n'
 
-        for sec in sessionStorage[user_id]._REC:
+        for sec in sorted(sessionStorage[user_id]._REC):
             try:
                 answer += poolRecords[sec].get_show_data()
             except KeyError: # Сеанс удален
@@ -535,7 +606,7 @@ def msg_handler(event):
             poolRecords[num]._LOCK.acquire() # Блокируем доступ
             if len(poolRecords[num]) > 0:
                 poolRecords[num].add(user_id)
-                sessionStorage[user_id]._REC.append(num)
+                sessionStorage[user_id].add_rec(num)
                 answer = 'Вы записаны в бассейн ' + poolRecords[num].get_day() + ' в ' + poolRecords[num].get_time()
                 answer_notif = 'Пользователь ' + sessionStorage[user_id].get_name() + \
                                ' ' + sessionStorage[user_id].get_link() + \
@@ -590,25 +661,6 @@ def msg_handler(event):
         else:
             write_msg(event.user_id, answer)
         return
-
-# Базовые данные о сеансах
-base_data = [
-        (2020, 2, 25, 15, 00, 24),
-        (2020, 2, 25, 19, 00, 2),
-        (2020, 2, 29, 15, 00, 13),
-        (2020, 2, 29, 19, 00, 4),
-        (2020, 3, 1, 15, 00, 4),
-        (2020, 3, 2, 19, 00, 2),
-        (2020, 3, 3, 15, 00, 3),
-        (2020, 3, 4, 19, 00, 1),
-        (2020, 3, 5, 15, 00, 2),
-        (2020, 3, 6, 15, 00, 1),
-        (2020, 3, 6, 19, 00, 1)
-    ]
-
-for elem in base_data:
-    t = PoolTime(elem[0], elem[1], elem[2], elem[3], elem[4], elem[5])
-    poolRecords[t.get_sec()] = t
     
 if __name__ == '__main__':
     main()

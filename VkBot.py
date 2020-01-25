@@ -27,6 +27,9 @@ class VkBot:
         answer += 'Link: @id' + str(self._USER_ID) + '\n'
         return answer
 
+    def add_rec(self, sec):
+        self._REC.append(sec)
+
     def get_name(self):
         return self._FIRST_NAME + ' ' + self._LAST_NAME
 

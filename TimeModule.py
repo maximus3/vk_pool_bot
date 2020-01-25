@@ -49,6 +49,12 @@ class PoolTime:
         answer += '\n'
         return answer
 
+    def get_backup_data(self):
+        return [self._TIME.tm_year, self._TIME.tm_mon, self._TIME.tm_mday] + \
+               [self._TIME.tm_hour, self._TIME.tm_min, self._COUNT] + \
+               [len(self._IDS)] + \
+               self._IDS
+
     def add(self, user_id):
         self._IDS.append(user_id)
         self._COUNT -= 1
