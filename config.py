@@ -2,10 +2,10 @@ from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 TOKEN = 'TOKEN'
 
-#directory = '/root/vk_bot/'
-directory = ''
+directory = '/root/vk_bot/'
+#directory = ''
 
-version = '0.2.0 Beta'
+version = '0.2.1 Beta'
 
 # ID ВК для админов
 admin_ids = []

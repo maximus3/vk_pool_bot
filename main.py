@@ -75,6 +75,25 @@ notif_ids = []
 logging.info('Server started')
 print('Server started')
 
+step_actions = {
+        'mainUS': ['bot.reg', 'bot.admin'],
+        'main': ['pool.show', 'pool.add', 'pool.del', 'bot.out'],
+        'mainUS_admin': ['admin.show', 'admin.add', 'admin.del', 'admin.notif', 'admin.out'],
+        'mainUS_admin_show': ['admin.show.num'],
+        'mainUS_admin_add': ['admin.add.mon', 'admin.add.day', 'admin.add.hour', 'admin.add.min', 'admin.add.count'],
+        'mainUS_admin_del': ['admin.del.num'],
+        'main_add': ['pool.add.num'],
+        'main_del': ['pool.del.num']
+    }
+
+def wrong_step(step, action):
+    if action == None:
+        return False
+    if action in ['bot.next_page', 'bot.prev_page', 'bot.cancel'] and step not in ['mainUS', 'main', 'mainUS_admin']:
+        return False
+    if action not in step_actions.get(step):
+        return True
+    return False
 
 def main():
     for event in longpoll.listen():
@@ -102,7 +121,7 @@ def admin_menu(event):
     if payload:
         action = payload.get('action')
 
-    if action == None and step == 'mainUS_admin_del':
+    if action == None and step == 'mainUS_admin_delconf':
         num = sessionStorage[user_id]._ADMIN_DATA.pop('num')
         if text == 'УДАЛИТЬ':
             poolRecords[num]._LOCK.acquire() # Блокируем доступ
@@ -119,6 +138,7 @@ def admin_menu(event):
         return
 
     elif action == 'admin.show':
+        sessionStorage[user_id].next_step('show')
         answer = 'Список сеансов:\n\n'
         my_keyb = []
         #my_keyb.append({'label': 'Показать все', 'color': VkKeyboardColor.PRIMARY, 'payload': {'action': 'admin.show.all'}})
@@ -132,11 +152,11 @@ def admin_menu(event):
                 pass
         if len(my_keyb) == 0:
             answer = 'Сеансов не найдено'
+            sessionStorage[user_id].prev_step()
             keyboard = get_keyboard(sessionStorage[user_id]._STEP)
         else:
             answer += '\nВыберите сеанс'
             keyboard = make_keyb(my_keyb, user_id, 'Выберите сеанс')
-            sessionStorage[user_id].next_step('show')
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
@@ -162,7 +182,8 @@ def admin_menu(event):
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
-    elif action == 'admin.add': 
+    elif action == 'admin.add':
+        sessionStorage[user_id].next_step('add')
         data = get_session_data()
         my_keyb = []
         for i in range(len(data)):
@@ -172,7 +193,6 @@ def admin_menu(event):
         sessionStorage[user_id]._ADMIN_DATA['add'] = data
         answer = 'Выберите месяц'
         keyboard = make_keyb(my_keyb, user_id, answer)
-        sessionStorage[user_id].next_step('add')
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
@@ -244,6 +264,7 @@ def admin_menu(event):
         return
 
     elif action == 'admin.del':
+        sessionStorage[user_id].next_step('del')
         my_keyb = []
         for sec in sorted(poolRecords):
             try:
@@ -254,15 +275,17 @@ def admin_menu(event):
                 pass
         if len(my_keyb) == 0:
             answer = 'Сеансов не найдено'
+            sessionStorage[user_id].prev_step()
             keyboard = get_keyboard(sessionStorage[user_id]._STEP)
         else:
             answer = 'Выберите сеанс, который хотите удалить'
             keyboard = make_keyb(my_keyb, user_id, answer)
-            sessionStorage[user_id].next_step('del')
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
     elif action == 'admin.del.num':
+        sessionStorage[user_id].prev_step()
+        sessionStorage[user_id].next_step('delconf')
         num = payload['num']
         try:
             answer = poolRecords[num].get_show_data()
@@ -310,6 +333,7 @@ def msg_handler(event):
     user_id = event.user_id
     text = event.text.lower()
     msg_id = event.message_id
+    step = sessionStorage[user_id]._STEP
     if 'payload' in dir(event):
         payload = eval(event.payload)
     else:
@@ -319,6 +343,9 @@ def msg_handler(event):
 
     if payload:
         action = payload.get('action')
+
+    if wrong_step(step, action):
+        return
 
     #ai_ans = False
     #ai_response = '#no_answer'
@@ -413,12 +440,13 @@ def msg_handler(event):
             return
 
         elif action == 'bot.admin':
+            sessionStorage[user_id].next_step('admin')
             if user_id not in admin_ids:
                 answer = 'Доступ запрещен'
+                sessionStorage[user_id].prev_step()
             else:
                 answer = 'Добро пожаловать!'
                 sessionStorage[user_id]._ADMIN = True
-                sessionStorage[user_id].next_step('admin')
             keyboard = get_keyboard(sessionStorage[user_id]._STEP)
             write_msg(event.user_id, answer, keyboard=keyboard)
             return
@@ -454,6 +482,7 @@ def msg_handler(event):
         return
 
     elif action == 'pool.add': # main
+        sessionStorage[user_id].next_step('add')
         my_keyb = []
         for sec in sorted(poolRecords):
             try:
@@ -469,16 +498,17 @@ def msg_handler(event):
                 pass
         if len(my_keyb) == 0:
             answer = 'Доступных записей нет'
+            sessionStorage[user_id].prev_step()
             keyboard = get_keyboard(sessionStorage[user_id]._STEP)
         else:
             answer = 'Выберите доступное время'
             keyboard = make_keyb(my_keyb, user_id, answer)
-            sessionStorage[user_id].next_step('add')
                 
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
     elif action == 'pool.del': # main
+        sessionStorage[user_id].next_step('del')
         my_keyb = []
         for sec in sessionStorage[user_id]._REC:
             try:
@@ -489,11 +519,11 @@ def msg_handler(event):
                 pass
         if len(my_keyb) == 0:
             answer = 'У вас нет ни одной записи'
+            sessionStorage[user_id].prev_step()
             keyboard = get_keyboard(sessionStorage[user_id]._STEP)
         else:
             answer = 'Выберите запись, которую хотите удалить'
             keyboard = make_keyb(my_keyb, user_id, answer)
-            sessionStorage[user_id].next_step('del')
                 
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
