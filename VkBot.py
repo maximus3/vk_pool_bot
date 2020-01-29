@@ -17,6 +17,7 @@ class VkBot:
 
         # ADMIN
         self._ADMIN_DATA = {} # Файлы для админов
+        self._NOTIF = False
 
     def __str__(self):
         answer = 'User ID: ' + str(self._USER_ID) + '\n'
@@ -35,6 +36,9 @@ class VkBot:
 
     def get_link(self):
         return '@id' + str(self._USER_ID)
+
+    def get_backup_data(self):
+        return [self._USER_ID, self._FIRST_NAME, self._LAST_NAME, self._STEP, self._AUTH, self._ADMIN, self._NOTIF]
 
     def auth(self):
         self._AUTH = True
@@ -55,6 +59,9 @@ class VkBot:
 
     def set_step(self, step):
         self._STEP = step
+
+    def notif(self):
+        self._NOTIF = not self._NOTIF
 
     def out(self):
         self._AUTH = False

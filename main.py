@@ -86,9 +86,7 @@ def data_base_recovery():
         t = PoolTime(elem[0], elem[1], elem[2], elem[3], elem[4], elem[5])
         poolRecords[t.get_sec()] = t
 
-def data_recovery():
-    FILE = open(directory + "data.backup", "r")
-    elem = eval(FILE.read())
+def pool_recovery(elem):
     data = {}
     count = elem.pop(0)
     for i in range(count):
@@ -105,13 +103,56 @@ def data_recovery():
     global poolRecords
     poolRecords = data.copy()
 
+def users_recovery(users_data):
+    data = {}
+    count = users_data.pop(0)
+    for i in range(count):
+        t = VkBot(users_data.pop(0), [{'first_name': users_data.pop(0), 'last_name': users_data.pop(0)}])
+        step = users_data.pop(0)
+        if 'mainUS_admin' in step:
+            t.set_step('mainUS_admin')
+        elif 'mainUS' in step:
+            t.set_step('mainUS')
+        elif 'main_' in step:
+            t.set_step('main')
+        else:
+            t.set_step(step)
+        t._AUTH = users_data.pop(0)
+        t._ADMIN = users_data.pop(0)
+        t._NOTIF = users_data.pop(0)
+        if t._NOTIF:
+            notif_ids.append(t._USER_ID)
+        data[t._USER_ID] = t
+        if t._STEP != step:
+            keyboard = get_keyboard(t._STEP)
+            write_msg(t._USER_ID, 'Извините, произошла перезагрузка системы', keyboard=keyboard)
+    global sessionStorage
+    sessionStorage = data.copy()
+
+def data_recovery():
+    FILE = open(directory + DATA_BACKUP_FILE, "r")
+    line = FILE.read()
+    line = line.split('\n')
+    users_data = eval(line[0])
+    pool_data = eval(line[1])
+    users_recovery(users_data)
+    pool_recovery(pool_data)
+
 def data_backup():
     data = poolRecords.copy()
-    elem = [len(data)]
+    pool_data = [len(data)]
     for sec in data:
-        elem += data[sec].get_backup_data()
-    FILE = open(directory + "data.backup", "w")
-    FILE.write(str(elem))
+        pool_data += data[sec].get_backup_data()
+        
+    data = sessionStorage.copy()
+    users_data = [len(data)]
+    for user_id in data:
+        users_data += data[user_id].get_backup_data()
+        
+    FILE = open(directory + DATA_BACKUP_FILE, "w")
+    FILE.write(str(users_data))
+    FILE.write('\n')
+    FILE.write(str(pool_data))
     FILE.close()
     time.sleep(DATA_BACKUP_TIME)
 
@@ -161,6 +202,12 @@ def wrong_step(step, action):
 
 def main():
     global Backup_Thread
+    if sessionStorage.get(admin_ids[0]):
+        step = sessionStorage[admin_ids[0]]._STEP
+    else:
+        step = 'mainUS'
+    keyboard = get_keyboard(step)
+    write_msg(admin_ids[0], 'Бот запущен', keyboard=keyboard)
     for event in longpoll.listen():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
             
@@ -379,7 +426,8 @@ def admin_menu(event):
         write_msg(event.user_id, answer, keyboard=keyboard)
         return
 
-    elif action == 'admin.notif': 
+    elif action == 'admin.notif':
+        sessionStorage[user_id].notif()
         if user_id in notif_ids:
             notif_ids.remove(user_id)
             answer = 'Уведомления о новых записях выключены'
