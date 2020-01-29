@@ -107,7 +107,7 @@ def users_recovery(users_data):
     data = {}
     count = users_data.pop(0)
     for i in range(count):
-        t = VkBot(users_data.pop(0), [{'first_name': users_data.pop(0), 'last_name': users_data.pop(0)}])
+        t = VkBot(users_data.pop(0), [{'first_name': users_data.pop(0).decode('utf-8'), 'last_name': users_data.pop(0).decode('utf-8')}])
         step = users_data.pop(0)
         if 'mainUS_admin' in step:
             t.set_step('mainUS_admin')

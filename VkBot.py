@@ -38,7 +38,7 @@ class VkBot:
         return '@id' + str(self._USER_ID)
 
     def get_backup_data(self):
-        return [self._USER_ID, self._FIRST_NAME, self._LAST_NAME, self._STEP, self._AUTH, self._ADMIN, self._NOTIF]
+        return [self._USER_ID, self._FIRST_NAME.encode('utf-8'), self._LAST_NAME.encode('utf-8'), self._STEP, self._AUTH, self._ADMIN, self._NOTIF]
 
     def auth(self):
         self._AUTH = True
